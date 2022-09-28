@@ -1,0 +1,19 @@
+{
+  "name": "capitalisk-deployer",
+  "version": "0.0.1",
+  "description": "Deploys a blockchain app",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "blockchain",
+    "market",
+    "dex"
+  ],
+  "author": "Maarten Coppens",
+  "license": "MIT",
+  "dependencies": {
+    "command-exists": "^1.2.9"
+  }
+}
