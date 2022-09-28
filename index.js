@@ -12,8 +12,8 @@ const JSON_INDENTATION = 2;
 
 class CustomError extends Error {
   constructor(message, name) {
+    super(message);
     this.name = name;
-    this.message = message;
   }
 }
 
@@ -119,7 +119,10 @@ class CapitaliskDeployer {
         genesis,
       );
     } catch (e) {
-      throw new CustomError(`Error writing genesis file! ${e.message}`, 'GenesisWriteFail');
+      throw new CustomError(
+        `Error writing genesis file! ${e.message}`,
+        'GenesisWriteFail',
+      );
     }
   }
 

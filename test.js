@@ -54,7 +54,5 @@ const deployer = new CapitaliskDeployer({
   //   },
   //   true,
   // );
-
   // await deployer.verifyDeployment();
-  // console.log(deployer.deployed)
 })();
