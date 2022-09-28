@@ -2,11 +2,11 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const commandExists = require('command-exists').sync;
 const os = require('os');
-const { readFile, writeFile } = require('fs/promises');
+const { readFile, writeFile, readdir } = require('fs/promises');
 
 const DEFAULT_REPOSITORY_URL =
   'https://github.com/Capitalisk/capitalisk-core.git';
-const DEFAULT_DIR_NAME = 'capitalisk-core';
+const DEFAULT_PROJECT_NAME = 'capitalisk';
 const DEFAULT_NETWORK_SYMBOL = 'clsk';
 const JSON_INDENTATION = 2;
 
@@ -22,12 +22,13 @@ class CapitaliskDeployer {
 
   constructor({
     gitUrl = DEFAULT_REPOSITORY_URL,
-    dirName = DEFAULT_DIR_NAME,
+    projectName = DEFAULT_PROJECT_NAME,
     networkSymbol = DEFAULT_NETWORK_SYMBOL,
     path = process.cwd(),
   }) {
     this.gitUrl = gitUrl;
-    this.dirName = dirName;
+    this.projectName = projectName;
+    this.dirName = this.projectName + '-core';
     this.networkSymbol = networkSymbol;
     this.path = path;
     this.#deployed = false;
@@ -51,6 +52,7 @@ class CapitaliskDeployer {
     }
 
     this.#verifyDeployment();
+    this.getConfig();
   }
 
   async #verifyDeployment() {
@@ -58,11 +60,44 @@ class CapitaliskDeployer {
     this.#deployed = !!stdout.match(/capitalisk-core/);
   }
 
-  async deploy() {
+  async projectDirectoryCloned() {
+    try {
+      await readdir(`${this.path}/${this.dirName}`);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async clone() {
+    if (await this.projectDirectoryCloned()) return;
+
     console.log(`Cloning ${this.gitUrl} as ${this.dirName}`);
     await exec(`git clone ${this.gitUrl} ${this.dirName}`, {
       cwd: `${this.path}`,
     });
+
+    if (DEFAULT_PROJECT_NAME !== this.projectName) {
+      console.log('Renaming docker-compose container names');
+      const dc = await readFile(
+        `${this.path}/${this.dirName}/docker-compose.yml`,
+        { encoding: 'utf8' },
+      );
+
+      const newDc = dc.replaceAll(DEFAULT_PROJECT_NAME, this.projectName);
+
+      await writeFile(
+        `${this.path}/${this.dirName}/docker-compose.yml`,
+        newDc,
+        {
+          encoding: 'utf8',
+        },
+      );
+    }
+  }
+
+  async deploy() {
+    await this.clone();
 
     console.log(`Build docker`);
     await exec(`docker-compose build --no-cache`, {
@@ -73,6 +108,15 @@ class CapitaliskDeployer {
     await exec(`docker-compose up -d`, {
       cwd: `${this.path}/${this.dirName}`,
     });
+
+    this.createDatabase(this.config.base.components.dal.connection.database);
+
+    for (const key in this.config.modules) {
+      const m = this.config.modules[key];
+      if (m.components && m.components.dal) {
+        this.createDatabase(m.components.dal.connection.database);
+      }
+    }
 
     this.#deployed = true;
   }
@@ -99,23 +143,29 @@ class CapitaliskDeployer {
 
   async updateDeploy() {
     console.log(`Recreating docker containers`);
-    await exec(`docker-compose up -d --force-recreate`);
+    await exec(`docker-compose up -d --force-recreate`, {
+      cwd: `${this.path}/${this.dirName}`,
+    });
   }
 
-  async createGenesis(genesis) {
+  async createGenesis(genesis, networkSymbol = this.networkSymbol) {
+    await this.clone();
+
+    console.log(`Creating ${networkSymbol} genesis`);
+
     try {
       const g = await this.#readJSONFile(
-        `${this.path}/${this.dirName}/genesis/mainnet/${this.networkSymbol}-genesis.json`,
+        `${this.path}/${this.dirName}/genesis/mainnet/${networkSymbol}-genesis.json`,
       );
 
-      if (g && g.networkSymbol === this.networkSymbol) {
+      if (g && g.networkSymbol === networkSymbol) {
         console.log('Genesis is already present');
       }
     } catch (e) {}
 
     try {
       await this.#writeJSONFile(
-        `${this.path}/${this.dirName}/genesis/mainnet/${this.networkSymbol}-genesis.json`,
+        `${this.path}/${this.dirName}/genesis/mainnet/${networkSymbol}-genesis.json`,
         genesis,
       );
     } catch (e) {
@@ -126,32 +176,62 @@ class CapitaliskDeployer {
     }
   }
 
-  async writeConfig(config, extendCapitalisk) {
-    console.log(`Adding config`);
+  async getConfig() {
     const c = await this.#readJSONFile(
       `${this.path}/${this.dirName}/config.json`,
     );
 
-    // Removing
-    if (!extendCapitalisk && c.modules['capitalisk_chain']) {
-      console.log('Removing capitalisk_chain entry')
-      delete c.modules['capitalisk_chain'];
-    }
+    this.config = c;
 
-    console.log(`Adding database inside postgresql container`);
+    return c;
+  }
+
+  async writeConfig(
+    config,
+    {
+      // extend = false,
+      projectName = this.projectName,
+    },
+  ) {
+    await this.clone();
+
+    if (!config) throw new Error('Need a config to proceed!');
+
+    console.log(`Adding config`);
+    const c = await this.getConfig();
+
+    // TODO: Remove all entries, create custom blockchain
+    // if (!extend && c.modules['capitalisk_chain']) {
+    //   console.log('Removing capitalisk_chain entry');
+    //   delete c.modules['capitalisk_chain'];
+    // }
+
+    c.modules[`${projectName}_chain`] = config;
+
+    await this.#writeJSONFile(`${this.path}/${this.dirName}/config.json`, c);
+  }
+
+  async createDatabase(db) {
+    // TODO: Fix this
+    // const { stdout } = await exec(
+    //   `docker exec ${this.projectName}-postgres runuser -l postgres -c "psql -U ldpos --list"`,
+    // );
+    // if (stdout.match(db)) {
+    //   console.log(`Database ${db} already exists, skipping.`);
+    // }
+
+    console.log(`Creating ${db} database inside postgresql container`);
     try {
       await exec(
-        `docker exec capitalisk-postgres runuser -l postgres -c "createdb -U ldpos ${config.components.dal.connection.database}"`,
+        `docker exec ${this.projectName}-postgres runuser -l postgres -c "createdb -U ldpos ${db}"`,
       );
     } catch (e) {
       if (e.message.match(/exists/g)) {
-        console.log('Recreating the database');
+        console.log(`Recreating ${db}`);
         await exec(
-          `docker exec capitalisk-postgres runuser -l postgres -c "dropdb -U ldpos ${config.components.dal.connection.database}"`,
+          `docker exec ${this.projectName}-postgres runuser -l postgres -c "dropdb -U ldpos ${db}"`,
         );
-        await exec(
-          `docker exec capitalisk-postgres runuser -l postgres -c "createdb -U ldpos ${config.components.dal.connection.database}"`,
-        );
+        await this.createDatabase(db);
       } else {
         throw new CustomError(
           `Failed to create the database in the docker container! ${e.message}`,
@@ -159,12 +239,16 @@ class CapitaliskDeployer {
         );
       }
     }
+  }
 
-    c.modules[`${this.dirName.split('-')[0]}_chain`] = config;
+  async addNetwork(genesis, config, { projectName }) {
+    await this.createGenesis(genesis, genesis.networkSymbol);
 
-    await this.#writeJSONFile(`${this.path}/${this.dirName}/config.json`, c);
+    await this.writeConfig(config, { projectName });
 
-    console.log(c);
+    await this.createDatabase(config.components.dal.connection.database);
+
+    await this.updateDeploy();
   }
 
   async #readJSONFile(filePath) {
