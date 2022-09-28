@@ -29,30 +29,27 @@ const deployer = new CapitaliskDeployer({
   //     },
   //   ],
   // });
-  // await deployer.addConfig(
-  //   {
-  //     modulePath: 'node_modules/ldpos-chain',
-  //     genesisPath: 'genesis/mainnet/ldpos-genesis.json',
-  //     components: {
-  //       logger: {
-  //         logFileName: 'logs/mainnet/ldpos.log',
-  //         consoleLogLevel: 'debug',
-  //         fileLogLevel: 'error',
-  //       },
-  //       dal: {
-  //         libPath: 'node_modules/ldpos-pg-dal',
-  //         client: 'pg',
-  //         connection: {
-  //           host: '127.0.0.1',
-  //           user: 'ldpos',
-  //           password: 'ldpos',
-  //           database: 'ldpos_main',
-  //           port: '5432',
-  //         },
-  //       },
-  //     },
-  //   },
-  //   true,
-  // );
+  await deployer.writeConfig({
+    modulePath: 'node_modules/ldpos-chain',
+    genesisPath: 'genesis/mainnet/ldpos-genesis.json',
+    components: {
+      logger: {
+        logFileName: 'logs/mainnet/ldpos.log',
+        consoleLogLevel: 'debug',
+        fileLogLevel: 'error',
+      },
+      dal: {
+        libPath: 'node_modules/ldpos-pg-dal',
+        client: 'pg',
+        connection: {
+          host: '127.0.0.1',
+          user: 'ldpos',
+          password: 'ldpos',
+          database: 'ldpos_main',
+          port: '5432',
+        },
+      },
+    },
+  });
   // await deployer.verifyDeployment();
 })();

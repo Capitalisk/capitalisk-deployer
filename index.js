@@ -126,41 +126,45 @@ class CapitaliskDeployer {
     }
   }
 
-  async addConfig(config, extendCapitalisk) {
-    if (extendCapitalisk) {
-      console.log(`Adding config`);
-      const c = await this.#readJSONFile(
-        `${this.path}/${this.dirName}/config.json`,
-      );
+  async writeConfig(config, extendCapitalisk) {
+    console.log(`Adding config`);
+    const c = await this.#readJSONFile(
+      `${this.path}/${this.dirName}/config.json`,
+    );
 
-      console.log(`Adding database inside postgresql container`);
-      try {
+    // Removing
+    if (!extendCapitalisk && c.modules['capitalisk_chain']) {
+      console.log('Removing capitalisk_chain entry')
+      delete c.modules['capitalisk_chain'];
+    }
+
+    console.log(`Adding database inside postgresql container`);
+    try {
+      await exec(
+        `docker exec capitalisk-postgres runuser -l postgres -c "createdb -U ldpos ${config.components.dal.connection.database}"`,
+      );
+    } catch (e) {
+      if (e.message.match(/exists/g)) {
+        console.log('Recreating the database');
+        await exec(
+          `docker exec capitalisk-postgres runuser -l postgres -c "dropdb -U ldpos ${config.components.dal.connection.database}"`,
+        );
         await exec(
           `docker exec capitalisk-postgres runuser -l postgres -c "createdb -U ldpos ${config.components.dal.connection.database}"`,
         );
-      } catch (e) {
-        if (e.message.match(/exists/g)) {
-          console.log('Recreating the database');
-          await exec(
-            `docker exec capitalisk-postgres runuser -l postgres -c "dropdb -U ldpos ${config.components.dal.connection.database}"`,
-          );
-          await exec(
-            `docker exec capitalisk-postgres runuser -l postgres -c "createdb -U ldpos ${config.components.dal.connection.database}"`,
-          );
-        } else {
-          throw new CustomError(
-            `Failed to create the database in the docker container! ${e.message}`,
-            'PostgresInitFail',
-          );
-        }
+      } else {
+        throw new CustomError(
+          `Failed to create the database in the docker container! ${e.message}`,
+          'PostgresInitFail',
+        );
       }
-
-      c.modules[`${this.dirName.split('-')[0]}_chain`] = config;
-
-      await this.#writeJSONFile(`${this.path}/${this.dirName}/config.json`, c);
-
-      console.log(c);
     }
+
+    c.modules[`${this.dirName.split('-')[0]}_chain`] = config;
+
+    await this.#writeJSONFile(`${this.path}/${this.dirName}/config.json`, c);
+
+    console.log(c);
   }
 
   async #readJSONFile(filePath) {
